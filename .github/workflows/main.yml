@@ -1,30 +1,66 @@
-name: Ejecutar Bot
+import websocket
+import json
 
-on:
-  push:
-    branches:
-      - main
-  schedule:
-    - cron: '0 * * * *'  # Corre el bot cada hora
+# Tu API Key de Deriv
+api_key = "TU_API_KEY"
 
-jobs:
-  run-bot:
-    runs-on: ubuntu-latest
+def on_open(ws):
+    print("Conexión establecida con Deriv")
+    # Autenticación en Deriv con tu API Key
+    auth_data = {
+        "authorize": api_key
+    }
+    ws.send(json.dumps(auth_data))
 
-    steps:
-    - name: Checkout repo
-      uses: actions/checkout@v2
+def on_message(ws, message):
+    data = json.loads(message)
+    
+    # Verificar si hay errores
+    if "error" in data:
+        print(f"Error: {data['error']['message']}")
+        return
 
-    - name: Set up Python
-      uses: actions/setup-python@v2
-      with:
-        python-version: '3.x'
+    # Si la conexión es exitosa, solicitar ticks (precios) en tiempo real
+    if data.get("authorize"):
+        print("Autenticación exitosa.")
+        # Ejemplo: solicitar precios de un activo
+        tick_request = {
+            "ticks": "R_50"  # Puedes cambiar el activo por el que prefieras
+        }
+        ws.send(json.dumps(tick_request))
 
-    - name: Install dependencies
-      run: |
-        pip install websocket-client flask
+    # Procesar los precios recibidos
+    if "tick" in data:
+        price = data["tick"]["quote"]
+        print(f"Precio actual: {price}")
+        # Aquí podés agregar la lógica de tu estrategia (RSI, EMAs, etc.)
         
-    - name: Run the bot
-      run: |
-        python server.py
-      
+        # Luego de ejecutar la estrategia, ejecutá la orden
+        ejecutar_orden(ws, "CALL")  # O "PUT" para vender
+
+def ejecutar_orden(ws, tipo):
+    trade_data = {
+        "buy": 1,  # 1 para abrir posición
+        "parameters": {
+            "amount": 10,  # Monto de la operación
+            "basis": "stake",
+            "contract_type": tipo,  # "CALL" para compra, "PUT" para venta
+            "currency": "USD",
+            "duration": 5,  # Duración de la operación en ticks
+            "duration_unit": "t",
+            "symbol": "R_50"  # Cambia este símbolo por el que quieras operar
+        }
+    }
+    ws.send(json.dumps(trade_data))
+    print(f"Orden {tipo} ejecutada")
+
+def on_error(ws, error):
+    print(f"Error: {error}")
+
+def on_close(ws, close_status_code, close_msg):
+    print("Conexión cerrada")
+
+# Conectar al WebSocket de Deriv
+url = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
+ws = websocket.WebSocketApp(url, on_open=on_open, on_message=on_message, on_error=on_error, on_close=on_close)
+ws.run_forever()
